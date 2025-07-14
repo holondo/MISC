@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador Físico de Lente</title>
+    <style>
+        :root {
+            --blur: 8px;
+            --brightness: 1.05;
+            
+            /* Esta variável será totalmente controlada pelo JS */
+            --lighting-effect: radial-gradient(circle, transparent, black); 
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: white;
+            background-color: #1a1a1a;
+            background-size: cover;
+            background-position: center center;
+            background-attachment: fixed;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+            transition: background-image 0.7s ease-in-out;
+            overflow: hidden;
+        }
+        
+        .parallax-container {
+            transition: transform 0.1s ease-out;
+            will-change: transform;
+            display: flex;
+            gap: 2rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: flex-start;
+            width: 100%;
+            max-width: 950px;
+        }
+
+        .glass-element {
+            position: relative;
+            background: rgba(30, 30, 30, 0.15);
+            border-radius: 24px;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            z-index: 1;
+
+            backdrop-filter: blur(var(--blur)) brightness(var(--brightness));
+            -webkit-backdrop-filter: blur(var(--blur)) brightness(var(--brightness));
+        }
+
+        /* Pseudo-elemento para a DISTORÇÃO */
+        .glass-element::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 0;
+            background: inherit;
+            background-attachment: fixed;
+            filter: url(#lens-distortion);
+        }
+
+        /* Pseudo-elemento para a ILUMINAÇÃO (borda, brilho, sombra) */
+        .glass-element::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 2;
+            border-radius: inherit;
+            pointer-events: none;
+            background: var(--lighting-effect);
+        }
+        
+        .glass-content { position: relative; z-index: 1; padding: 2rem; }
+
+        .glass-card h1 { font-size: 2.5rem; margin-bottom: 0.5rem; text-shadow: 0 0 20px black; }
+        .glass-card p { line-height: 1.6; text-shadow: 0 0 10px black; }
+
+        .glass-button {
+            padding: 1rem 2rem; font-size: 1rem; font-weight: bold;
+            color: white; cursor: pointer; border: none; outline: none;
+            text-shadow: 0 0 5px rgba(0,0,0,0.5); transition: background 0.3s ease;
+            margin-top: 1.5rem;
+        }
+        .glass-button:hover { background: rgba(255, 255, 255, 0.2); }
+
+        .controls-panel { width: 100%; max-width: 450px; }
+        .controls-panel h2 { text-align: center; margin-bottom: 1rem; font-size: 1.5rem; }
+        .control-group { margin-bottom: 1.2rem; }
+        .control-group-title { font-weight: bold; font-size: 1.1rem; margin-bottom: 0.8rem; padding-bottom: 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.2); }
+        .control-group label { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-weight: 500; }
+        .control-group label span:last-child { font-family: monospace; background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px; }
+        
+        input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; background: rgba(0, 0, 0, 0.3); border-radius: 5px; outline: none; padding: 0; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px; background: rgba(255, 255, 255, 0.85); cursor: pointer; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.6); box-shadow: 0 0 10px rgba(0,0,0,0.6); }
+        input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; background: rgba(255, 255, 255, 0.85); cursor: pointer; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.6); }
+
+        @media (max-width: 850px) {
+            body { padding: 1rem; align-items: flex-start; overflow-y: auto; }
+            .parallax-container { flex-direction: column; align-items: center; gap: 1.5rem; }
+            .glass-card, .controls-panel { width: 100%; max-width: 500px; }
+            .glass-card h1 { font-size: 2rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <svg width="0" height="0" style="position:absolute;">
+        <filter id="lens-distortion">
+            <!-- 1. Usamos feImage para carregar nosso mapa de deslocamento gerado por JS. -->
+            <feImage id="displacementMapImage" href="" x="0" y="0" width="100%" height="100%" result="displacementMap"/>
+            
+            <!-- 2. Criamos o deslocamento principal (canais G e B) -->
+            <feDisplacementMap in="SourceGraphic" in2="displacementMap" scale="0" xChannelSelector="R" yChannelSelector="G" result="disp-main" id="disp-main" />
+
+            <!-- 3. Criamos o deslocamento para a aberração (canal R) com um 'scale' ligeiramente maior -->
+            <feDisplacementMap in="SourceGraphic" in2="displacementMap" scale="0" xChannelSelector="R" yChannelSelector="G" result="disp-aberration" id="disp-aberration" />
+
+            <!-- 4. Isolamos e combinamos os canais de cor para criar a aberração cromática -->
+            <feColorMatrix in="disp-aberration" type="matrix" result="red-channel" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" />
+            <feColorMatrix in="disp-main" type="matrix" result="other-channels" values="0 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0" />
+            <feBlend in="red-channel" in2="other-channels" mode="screen" />
+        </filter>
+    </svg>
+
+    <div class="parallax-container">
+        
+        <div class="glass-card glass-element">
+            <div class="glass-content">
+                <h1>Lente Física</h1>
+                <p>Simulação de lente com distorção convexa, aberração cromática e iluminação procedural. Tudo é renderizado em tempo real.</p>
+                <button class="glass-button glass-element" id="change-bg-btn">
+                    <span class="glass-content">Mudar Background</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="controls-panel glass-element">
+            <div class="glass-content">
+                <h2>Parâmetros Físicos</h2>
+
+                <div class="control-group">
+                    <div class="control-group-title">Distorção da Lente</div>
+                    <label><span>Curvatura (Distorção)</span><span id="distort-amount-value">50</span></label>
+                    <input type="range" id="distort-amount-slider" min="0" max="150" step="1" value="50">
+                    <label><span>Aberração Cromática</span><span id="aberration-amount-value">2.5</span></label>
+                    <input type="range" id="aberration-amount-slider" min="0" max="20" step="0.1" value="2.5">
+                </div>
+
+                <div class="control-group">
+                    <div class="control-group-title">Iluminação</div>
+                    <label><span>Ângulo da Luz</span><span id="light-angle-value">45°</span></label>
+                    <input type="range" id="light-angle-slider" min="0" max="360" step="1" value="45">
+                    
+                    <label><span>Suavidade do Destaque</span><span id="highlight-softness-value">30%</span></label>
+                    <input type="range" id="highlight-softness-slider" min="5" max="80" step="1" value="30">
+
+                    <label><span>Opacidade da Sombra</span><span id="shadow-opacity-value">0.2</span></label>
+                    <input type="range" id="shadow-opacity-slider" min="0" max="1" step="0.05" value="0.2">
+
+                    <label><span>Suavidade da Sombra</span><span id="shadow-softness-value">95%</span></label>
+                    <input type="range" id="shadow-softness-slider" min="70" max="100" step="1" value="95">
+                </div>
+
+                <div class="control-group">
+                     <div class="control-group-title">Fundo</div>
+                    <label><span>Desfoque (Blur)</span><span id="blur-value">8px</span></label>
+                    <input type="range" id="blur-slider" min="0" max="30" step="1" value="8">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const root = document.documentElement;
+        
+        // --- Seletores do filtro SVG ---
+        const feImage = document.getElementById('displacementMapImage');
+        const dispMain = document.getElementById('disp-main');
+        const dispAberration = document.getElementById('disp-aberration');
+
+        // --- Seletores dos Sliders ---
+        const sliders = {
+            distortAmount: { el: document.getElementById('distort-amount-slider'), valEl: document.getElementById('distort-amount-value') },
+            aberrationAmount: { el: document.getElementById('aberration-amount-slider'), valEl: document.getElementById('aberration-amount-value') },
+            lightAngle: { el: document.getElementById('light-angle-slider'), valEl: document.getElementById('light-angle-value'), unit: '°' },
+            highlightSoftness: { el: document.getElementById('highlight-softness-slider'), valEl: document.getElementById('highlight-softness-value'), unit: '%' },
+            shadowOpacity: { el: document.getElementById('shadow-opacity-slider'), valEl: document.getElementById('shadow-opacity-value') },
+            shadowSoftness: { el: document.getElementById('shadow-softness-slider'), valEl: document.getElementById('shadow-softness-value'), unit: '%' },
+            blur: { el: document.getElementById('blur-slider'), valEl: document.getElementById('blur-value'), unit: 'px' },
+        };
+
+        // --- GERAÇÃO DO MAPA DE DESLOCAMENTO PROCEDURAL ---
+        const canvas = document.createElement('canvas');
+        const MAP_SIZE = 256; // A resolução do nosso mapa de deslocamento
+        canvas.width = canvas.height = MAP_SIZE;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        
+        function generateDisplacementMap() {
+            const imageData = ctx.createImageData(MAP_SIZE, MAP_SIZE);
+            const data = imageData.data;
+            const centerX = MAP_SIZE / 2;
+            const centerY = MAP_SIZE / 2;
+
+            for (let y = 0; y < MAP_SIZE; y++) {
+                for (let x = 0; x < MAP_SIZE; x++) {
+                    const dx = x - centerX;
+                    const dy = y - centerY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // Normaliza os vetores de deslocamento (-1 a 1)
+                    const normalizedX = (distance === 0) ? 0 : dx / distance;
+                    const normalizedY = (distance === 0) ? 0 : dy / distance;
+                    
+                    // Mapeia o deslocamento para valores de cor (0-255)
+                    // 128 é o ponto zero (sem deslocamento)
+                    const r = 128 + normalizedX * 128;
+                    const g = 128 + normalizedY * 128;
+                    
+                    const i = (y * MAP_SIZE + x) * 4;
+                    data[i] = r;      // Canal Vermelho -> Deslocamento X
+                    data[i + 1] = g;  // Canal Verde -> Deslocamento Y
+                    data[i + 2] = 0;  // Canal Azul (não usado)
+                    data[i + 3] = 255;// Canal Alfa
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+            // Define o resultado como o source da imagem no filtro SVG
+            feImage.setAttribute('href', canvas.toDataURL());
+        }
+
+
+        // --- Lógica de Backgrounds Aleatórios ---
+        const backgrounds = ['url(https://images.unsplash.com/photo-1501854140801-50d01698950b?auto=format&fit=crop&w=1920)', 'url(https://images.unsplash.com/photo-1552083375-1447ce886485?auto=format&fit=crop&w=1920)', 'url(https://images.unsplash.com/photo-1470770841072-f978cf4d019e?auto=format&fit=crop&w=1920)', 'url(https://images.unsplash.com/photo-1542601906-823816279999?auto=format&fit=crop&w=1920)', 'url(https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?auto=format&fit=crop&w=1920)', 'repeating-linear-gradient(45deg, #606dbc, #606dbc 10px, #465298 10px, #465298 20px)', 'repeating-radial-gradient(circle, #fde428, #fde428 10px, #f9c228 10px, #f9c228 20px)', 'linear-gradient(to top, #30cfd0 0%, #330867 100%)', 'radial-gradient(circle at top left, #f55, #f5a 30%, #5af 60%, #55f)'];
+        let currentBgIndex = -1;
+        document.getElementById('change-bg-btn').addEventListener('click', changeBackground);
+        function changeBackground() {
+            let newIndex;
+            do { newIndex = Math.floor(Math.random() * backgrounds.length); } while (newIndex === currentBgIndex);
+            currentBgIndex = newIndex;
+            document.body.style.backgroundImage = backgrounds[currentBgIndex];
+            document.body.style.backgroundSize = backgrounds[currentBgIndex].includes('repeating') ? 'auto' : 'cover';
+        }
+
+        // --- Função Principal de Atualização ---
+        function updateStyles() {
+            // Atualiza labels dos sliders
+            for (const key in sliders) {
+                if(sliders[key].el) sliders[key].valEl.textContent = `${sliders[key].el.value}${sliders[key].unit || ''}`;
+            }
+
+            // Atualiza variáveis CSS simples
+            root.style.setProperty('--blur', `${sliders.blur.el.value}px`);
+
+            // Atualiza filtro SVG de distorção
+            const distortion = parseFloat(sliders.distortAmount.el.value);
+            const aberration = parseFloat(sliders.aberrationAmount.el.value);
+            dispMain.setAttribute('scale', distortion);
+            dispAberration.setAttribute('scale', distortion + aberration);
+
+            // --- LÓGICA DE ILUMINAÇÃO PROCEDURAL ---
+            const angle = parseFloat(sliders.lightAngle.el.value);
+            const rad = angle * (Math.PI / 180);
+            const highlightX = 50 - Math.cos(rad) * 45;
+            const highlightY = 50 - Math.sin(rad) * 45;
+            const shadowX = 50 + Math.cos(rad) * 45;
+            const shadowY = 50 + Math.sin(rad) * 45;
+            
+            const highlightSoft = parseFloat(sliders.highlightSoftness.el.value);
+            const shadowOpacity = parseFloat(sliders.shadowOpacity.el.value);
+            const shadowSoft = parseFloat(sliders.shadowSoftness.el.value);
+
+            const lightingEffect = `
+                radial-gradient(
+                    circle at ${highlightX}% ${highlightY}%,
+                    rgba(255, 255, 255, 0.6) 0%,
+                    rgba(255, 255, 255, 0.3) ${highlightSoft * 0.2}%,
+                    transparent ${highlightSoft}%
+                ),
+                radial-gradient(
+                    circle at ${shadowX}% ${shadowY}%,
+                    rgba(0, 0, 0, ${shadowOpacity}) 0%,
+                    transparent ${shadowSoft}%
+                )
+            `;
+            root.style.setProperty('--lighting-effect', lightingEffect);
+        }
+        
+        // --- Lógica da Paralaxe ---
+        const parallaxContainer = document.querySelector('.parallax-container');
+        window.addEventListener('mousemove', (e) => {
+            if (window.innerWidth > 850) {
+                const { clientX, clientY } = e;
+                const { innerWidth, innerHeight } = window;
+                const offsetX = (clientX / innerWidth - 0.5) * 2;
+                const offsetY = (clientY / innerHeight - 0.5) * 2;
+                const tiltIntensity = 4;
+                const moveIntensity = 15;
+                parallaxContainer.style.transform = `
+                    perspective(1000px) 
+                    rotateX(${offsetY * tiltIntensity}deg) 
+                    rotateY(${-offsetX * tiltIntensity}deg) 
+                    translateX(${-offsetX * moveIntensity}px) 
+                    translateY(${-offsetY * moveIntensity}px)`;
+            }
+        });
+
+        // --- Inicialização ---
+        generateDisplacementMap(); // Gera o mapa de distorção uma vez no início
+        changeBackground();
+        updateStyles();
+        
+        // Adiciona event listeners para todos os sliders
+        for (const key in sliders) {
+            if(sliders[key].el) sliders[key].el.addEventListener('input', updateStyles);
+        }
+    });
+    </script>
+</body>
+</html>
